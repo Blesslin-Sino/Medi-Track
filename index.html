@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>MediTrack</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body{
+font-family:Arial;
+background:linear-gradient(135deg,#667eea,#764ba2,#ff6a88);
+margin:0;
+color:white;
+}
+.container{
+width:90%;
+margin:auto;
+padding:20px;
+}
+.card{
+background:white;
+color:black;
+padding:15px;
+border-radius:10px;
+margin:10px 0;
+transition:0.3s;
+}
+.card:hover{
+transform:scale(1.02);
+}
+.dashboard{
+display:flex;
+gap:15px;
+}
+.dashboard .card{
+flex:1;
+text-align:center;
+}
+button{
+padding:8px 12px;
+border:none;
+background:#ff6a88;
+color:white;
+border-radius:6px;
+cursor:pointer;
+}
+input,select{
+padding:6px;
+margin:5px;
+}
+
+/* SMALL CHART */
+.chart-container{
+width:300px;
+height:300px;
+margin:auto;
+}
+
+#customPopup {
+    display:none;
+    position:fixed;
+    top:0;
+    left:0;
+    width:100%;
+    height:100%;
+    background:rgba(0,0,0,0.6);
+    justify-content:center;
+    align-items:center;
+}
+
+#popupBox {
+    background:white;
+    padding:30px;
+    border-radius:15px;
+    text-align:center;
+    width:320px;
+    box-shadow:0 5px 20px rgba(0,0,0,0.4);
+    animation: popupFade 0.3s ease;
+    color:black;
+}
+
+@keyframes popupFade {
+    from { transform: scale(0.8); opacity:0; }
+    to { transform: scale(1); opacity:1; }
+}
+
+#popupBox button {
+    margin-top:15px;
+    padding:8px 15px;
+    border:none;
+    background:#764ba2;
+    color:white;
+    border-radius:6px;
+    cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<h1>💊 MediTrack</h1>
+
+<div class="dashboard">
+<div class="card">
+<h3>Total</h3>
+<p>{{ total }}</p>
+</div>
+<div class="card">
+<h3>Taken</h3>
+<p>{{ taken }}</p>
+</div>
+<div class="card">
+<h3>Missed</h3>
+<p>{{ missed }}</p>
+</div>
+<div class="card">
+<h3>Health Score</h3>
+<p>{{ score }}%</p>
+</div>
+</div>
+
+<div class="card">
+<form method="POST">
+<input type="text" name="medicine" placeholder="Medicine" required>
+<input type="time" name="time" required>
+<input type="text" name="dosage" placeholder="Dosage (500mg)" required>
+<select name="frequency">
+<option>Once Daily</option>
+<option>Twice Daily</option>
+</select>
+<select name="category">
+<option>Tablet</option>
+<option>Syrup</option>
+<option>Injection</option>
+</select>
+<input type="number" name="stock" placeholder="Stock" required>
+<button>Add</button>
+</form>
+</div>
+
+{% for med in medicines %}
+<div class="card medicine-card">
+<strong>{{ med[1] }}</strong> |
+<span class="med-time">{{ med[2] }}</span> |
+{{ med[3] }} |
+{{ med[4] }} |
+{{ med[5] }} |
+Stock: {{ med[6] }}
+
+{% if med[7]==0 %}
+<a href="/mark/{{ med[0] }}"><button>Mark Taken</button></a>
+{% else %}
+✔ Taken
+{% endif %}
+
+<a href="/delete/{{ med[0] }}"><button>Delete</button></a>
+</div>
+{% endfor %}
+
+<!-- SMALL CHART -->
+<div class="card">
+<div class="chart-container">
+<canvas id="chart"></canvas>
+</div>
+</div>
+
+<div class="card">
+<form action="/upload" method="POST" enctype="multipart/form-data">
+<input type="file" name="file" required>
+<button>Upload Prescription</button>
+</form>
+</div>
+
+<div class="card">
+<a href="/ai"><button>🤖 AI Suggestion</button></a>
+</div>
+
+<a href="/emergency">
+<button style="background:red;">🚨 Emergency</button>
+</a>
+
+</div>
+
+<!-- POPUP -->
+<div id="customPopup">
+<div id="popupBox">
+<h3 id="popupText"></h3>
+<button onclick="closePopup()">OK</button>
+<button id="snoozeBtn">Snooze 5 Min</button>
+</div>
+</div>
+
+<script>
+/* CHART */
+var ctx=document.getElementById('chart').getContext('2d');
+new Chart(ctx,{
+    type:'doughnut',
+    data:{
+        labels:['Taken','Missed'],
+        datasets:[{
+            data:[{{taken}},{{missed}}]
+        }]
+    },  
+    options: {
+        responsive:true,
+        maintainAspectRatio:false
+    }
+});
+
+/* SOUND */
+let audio = new Audio("/static/reminder.mp3");
+audio.preload="auto";
+
+/* Unlock sound after first click */
+document.addEventListener("click",function(){
+audio.play().then(()=>{
+audio.pause();
+audio.currentTime=0;
+}).catch(()=>{});
+},{once:true});
+
+/* POPUP FUNCTION */
+function showPopup(message){
+document.getElementById("popupText").innerText=message;
+document.getElementById("customPopup").style.display="flex";
+audio.play();
+}
+
+function closePopup(){
+document.getElementById("customPopup").style.display="none";
+}
+
+/* CHECK REMINDER EVERY SECOND */
+function checkReminder(){
+let now=new Date();
+let hours=now.getHours().toString().padStart(2,'0');
+let minutes=now.getMinutes().toString().padStart(2,'0');
+let currentTime=hours+":"+minutes;
+
+let cards=document.querySelectorAll(".medicine-card");
+
+cards.forEach(card=>{
+let timeText=card.querySelector(".med-time").innerText.trim().substring(0,5);
+
+if(timeText===currentTime && !card.dataset.alerted){
+card.dataset.alerted="yes";
+let name=card.querySelector("strong").innerText;
+showPopup("⏰ Time to take: "+name);
+}
+});
+}
+
+setInterval(checkReminder,1000);
+
+</script>
+
+</body>
+</html>
